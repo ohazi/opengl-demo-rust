@@ -1,0 +1,7 @@
+[package]
+name = "opengl-demo"
+version = "0.1.0"
+authors = ["Oren Hazi <oren.hazi@gmail.com>"]
+
+[dependencies]
+glfw = "0.1.0"
