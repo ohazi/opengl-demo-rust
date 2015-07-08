@@ -11,8 +11,38 @@ use glfw::WindowHint;
 use glfw::OpenGlProfileHint;
 use glfw::WindowMode;
 use glfw::Context;
+use glfw::Action;
+use glfw::Key;
 
 use gl::types::*;
+
+
+/* Shader sources */
+static VERT_SHADER: &'static str =
+    "#version 330\n\
+    layout(location = 0) in vec2 point;\n\
+    uniform float angle;\n\
+    void main() {\n\
+        mat2 rotate = mat2(cos(angle), -sin(angle),\n\
+                           sin(angle), cos(angle));\n\
+        gl_Position = vec4(0.75 * rotate * point, 0.0, 1.0);\n\
+    }\n";
+
+static FRAG_SHADER: &'static str =
+    "#version 330\n\
+    out vec4 color;\n\
+    void main() {\n\
+        color = vec4(1, 0.15, 0.15, 0);\n\
+    }\n";
+
+/* Geometry */
+static SQUARE: [GLfloat; 8] = [
+    -1.0,  1.0,
+    -1.0, -1.0,
+     1.0,  1.0,
+     1.0, -1.0
+];
+
 
 fn compile_shader(shader_type: GLenum, source: &str) -> GLuint {
     let c_str = CString::new(source.as_bytes()).unwrap();
@@ -59,20 +89,16 @@ fn link_program(vert: GLuint, frag: GLuint) -> GLuint {
     program
 }
 
-/* set this up later...
-struct graphics_context {
-    window: glfw::Window,
-    program: GLuint,
-    uniform_angle: GLint,
-    vbo_point: GLuint,
-    vao_point: GLuint,
-    angle: f64,
-    framecount: i64,
-    lastframe: f64,
-}
-*/
 
-fn render(program: GLuint, uniform_angle: &GLint, angle: &mut f64, vao_point: GLuint, glfw: &glfw::Glfw, lastframe: &mut f64, framecount: &mut i64, window: &mut glfw::Window) {
+//TODO: this is ugly...
+fn render(program:       GLuint,
+          uniform_angle: &GLint,
+          angle:         &mut f64,
+          vao_point:     GLuint,
+          glfw:          &glfw::Glfw,
+          lastframe:     &mut f64,
+          framecount:    &mut i64,
+          window:        &mut glfw::Window) {
     unsafe {
         gl::ClearColor(0.15, 0.15, 0.15, 1.0);
         gl::Clear(gl::COLOR_BUFFER_BIT);
@@ -95,25 +121,35 @@ fn render(program: GLuint, uniform_angle: &GLint, angle: &mut f64, vao_point: GL
     *framecount += 1;
     if (now as i64) != (*lastframe as i64) {
         println!("FPS: {}", framecount);
+        *framecount = 0;
     }
-    *framecount = now as i64;
+    *lastframe = now;
     
     window.swap_buffers();
+}
+
+
+fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
+    match event {
+        glfw::WindowEvent::Key(Key::Q, _, Action::Press, _) => {
+            window.set_should_close(true);
+        },
+        _ => {}
+    }
 }
 
 fn main() {
     /* Options */
     let mut fullscreen = false;
-    let title = "OpenGL 3.3 Demo";
+    let title = "OpenGL 3.3 Demo (Rust)";
     
     for arg in env::args() {
-        if arg == "f" || arg == "-f" {
+        if arg == "-f" {
             fullscreen = true;
-            println!("Fullscreen");
         }
     }
     
-    /* Create window and OpenGL context */
+    /* Create window */
     let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     
     glfw.window_hint(WindowHint::Samples(4));
@@ -123,51 +159,28 @@ fn main() {
     glfw.window_hint(WindowHint::OpenGlForwardCompat(true));
     glfw.window_hint(WindowHint::OpenGlProfile(OpenGlProfileHint::Core));
     
-    let (mut window, _) = glfw.with_primary_monitor(
-        |glfw, m| {
-            let width = m.map_or(640,
-                |m| {
-                    m.get_video_mode().map_or(640,
-                        |vm| { vm.width })});
-            let height = m.map_or(480,
-                |m| {
-                    m.get_video_mode().map_or(480,
-                        |vm| { vm.height })});
-            glfw.create_window(width, height, title,
-                m.map_or(WindowMode::Windowed,
-                    |m| {
-                        match fullscreen {
-                            true => WindowMode::FullScreen(m),
-                            false => WindowMode::Windowed
-                        }
-                    }
-                )
+    let (mut window, events) = match fullscreen {
+        true => {
+            glfw.with_primary_monitor(
+                |glfw, om| {
+                    let m = om.unwrap();
+                    glfw.create_window(
+                        m.get_video_mode().unwrap().width,
+                        m.get_video_mode().unwrap().height,
+                        title,
+                        WindowMode::FullScreen(m)
+                    )
+                }
             )
         }
-    ).expect("Failed to create GLFW window.");
+        false => glfw.create_window(640, 640, title, WindowMode::Windowed)
+    }.expect("Failed to create GLFW window.");
     
     window.make_current();
     glfw.set_swap_interval(1);
     
+    /* Initialize OpenGL */
     gl::load_with(|s| window.get_proc_address(s));
-    
-    /* Shader sources */
-    static VERT_SHADER: &'static str =
-        "#version 330\n\
-        layout(location = 0) in vec2 point;\n\
-        uniform float angle;\n\
-        void main() {\n\
-            mat2 rotate = mat2(cos(angle), -sin(angle),\n\
-                               sin(angle), cos(angle));\n\
-            gl_Position = vec4(0.75 * rotate * point, 0.0, 1.0);\n\
-        }\n";
-    
-    static FRAG_SHADER: &'static str =
-        "#version 330\n\
-        out vec4 color;\n\
-        void main() {\n\
-            color = vec4(1, 0.15, 0.15, 0);\n\
-        }\n";
     
     /* Compile and link OpenGL program */
     let vert = compile_shader(gl::VERTEX_SHADER, VERT_SHADER);
@@ -181,13 +194,6 @@ fn main() {
         gl::DeleteShader(vert);
     }
     
-    static SQUARE: [GLfloat; 8] = [
-        -1.0,  1.0,
-        -1.0, -1.0,
-         1.0,  1.0,
-         1.0, -1.0
-    ];
-    
     /* Prepare vertex buffer object (VBO) */
     let mut vbo_point = 0 as GLuint;
     unsafe {
@@ -195,7 +201,7 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, vbo_point);
         gl::BufferData(gl::ARRAY_BUFFER,
                        mem::size_of_val(&SQUARE) as GLsizeiptr,
-                       mem::transmute(&SQUARE[0]), //ugly...
+                       mem::transmute(&SQUARE[0]), //TODO: this is ugly...
                        gl::STATIC_DRAW);
         gl::BindBuffer(gl::ARRAY_BUFFER, 0);
     }
@@ -219,7 +225,6 @@ fn main() {
     let mut lastframe = glfw.get_time();
     let mut framecount = 0;
     while !window.should_close() {
-        //render(...);
         render(
             program,
             &uniform_angle,
@@ -231,6 +236,9 @@ fn main() {
             &mut window
         );
         glfw.poll_events();
+        for (_, event) in glfw::flush_messages(&events) {
+            handle_window_event(&mut window, event);
+        }
     }
     println!("Exiting ...");
     
